@@ -35,8 +35,8 @@ jobs:
 
       - name: Setup Xcode
         run: |
-          # Xcode 16.3 has Swift 6.2 needed by swabble/openclawkit
-          sudo xcode-select -s /Applications/Xcode_16.3.app/Contents/Developer
+          # Use Xcode 16.4 with Swift 6.2+ for swabble/openclawkit
+          echo "DEVELOPER_DIR=/Applications/Xcode_26.3.app/Contents/Developer" >> $GITHUB_ENV
           xcodebuild -version
           swift --version
 
