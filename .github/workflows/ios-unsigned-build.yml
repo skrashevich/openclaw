@@ -115,13 +115,18 @@ jobs:
       - name: Locate .app Bundle
         id: locate_app
         run: |
-          APP_PATH=$(find "${{ github.workspace }}/apps/ios/build/DerivedData" -name "*.app" -type d -maxdepth 5 | head -1)
+          # Prefer main OpenClaw.app over OpenClawWatchApp.app
+          for candidate in "OpenClaw.app" "OpenClawWatchApp.app"; do
+            APP_PATH=$(find "${{ github.workspace }}/apps/ios/build/DerivedData" -name "$candidate" -type d -maxdepth 5 | head -1)
+            [ -n "$APP_PATH" ] && break
+          done
           if [ -z "$APP_PATH" ]; then
             echo "❌ .app bundle not found!"
             exit 1
           fi
           echo "Found .app: $APP_PATH"
           echo "app_path=$APP_PATH" >> $GITHUB_OUTPUT
+          ls -la "$APP_PATH"
 
       - name: Package Unsigned .ipa
         id: package_ipa
