@@ -43,10 +43,12 @@ jobs:
           xcodebuild -version
           swift --version
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
         with:
-          version: 10
+          node-version: 22
+
+      - name: Setup pnpm
+        run: npm install -g pnpm@latest-10
 
       - name: Install Dependencies
         run: pnpm install
