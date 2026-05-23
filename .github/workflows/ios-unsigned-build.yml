@@ -15,6 +15,7 @@ on:
       - "scripts/ios-*"
       - "shared/OpenClawKit/**"
       - "swabble/**"
+      - ".github/workflows/ios-unsigned-build.yml"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
