@@ -544,6 +544,34 @@ describe("anthropic provider replay hooks", () => {
     } as never);
 
     expect(normalized?.input).toEqual(["text", "image"]);
+    expect(normalized?.mediaInput).toEqual({
+      image: { maxSidePx: 1568, preferredSidePx: 1568, tokenMode: "provider" },
+    });
+  });
+
+  it("merges partial Claude image media metadata with provider limits", async () => {
+    const provider = await registerSingleProviderPlugin(anthropicPlugin);
+
+    const normalized = provider.normalizeResolvedModel?.({
+      provider: "anthropic",
+      modelId: "claude-opus-4-7",
+      model: {
+        id: "claude-opus-4-7",
+        name: "Claude Opus 4.7",
+        provider: "anthropic",
+        api: "anthropic-messages",
+        reasoning: true,
+        input: ["text", "image"],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 200_000,
+        maxTokens: 64_000,
+        mediaInput: { image: { maxBytes: 1 } },
+      },
+    } as never);
+
+    expect(normalized?.mediaInput).toEqual({
+      image: { maxBytes: 1, maxSidePx: 2576, preferredSidePx: 2576, tokenMode: "provider" },
+    });
   });
 
   it("normalizes GA 1M Claude variants to 1M context", async () => {
@@ -600,7 +628,13 @@ describe("anthropic provider replay hooks", () => {
       },
     } as never);
 
-    expect(normalized).toBeUndefined();
+    expectFields(normalized, {
+      contextWindow: 200_000,
+      contextTokens: 200_000,
+    });
+    expect(normalized?.mediaInput).toEqual({
+      image: { maxSidePx: 1568, preferredSidePx: 1568, tokenMode: "provider" },
+    });
   });
 
   it("resolves claude-cli synthetic oauth auth", async () => {

@@ -13,6 +13,17 @@ const CLAUDE_CLI_MODEL_LABELS: Record<string, string> = {
   "claude-haiku-4-5": "Claude Haiku 4.5 (Claude CLI)",
 };
 
+function resolveClaudeCliImageMediaInput(id: string): ModelCatalogEntry["mediaInput"] {
+  const maxSidePx = id === "claude-opus-4-7" ? 2576 : 1568;
+  return {
+    image: {
+      maxSidePx,
+      preferredSidePx: maxSidePx,
+      tokenMode: "provider",
+    },
+  };
+}
+
 function extractClaudeCliModelIds(): string[] {
   const ids: string[] = [];
   const seen = new Set<string>();
@@ -37,6 +48,7 @@ export function buildClaudeCliCatalogEntries(): ModelCatalogEntry[] {
     provider: CLAUDE_CLI_BACKEND_ID,
     reasoning: true,
     input: ["text", "image"],
+    mediaInput: resolveClaudeCliImageMediaInput(id),
     contextWindow: CLAUDE_CLI_DEFAULT_CONTEXT_WINDOW,
   }));
 }
