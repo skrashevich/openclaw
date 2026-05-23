@@ -12,11 +12,29 @@ import type { ConfigValidationIssue, OpenClawConfig } from "../config/types.open
 import { resolveSecretInputRef } from "../config/types.secrets.js";
 import { hasAmbiguousGatewayAuthModeConfig } from "../gateway/auth-mode-policy.js";
 import { resolveGatewayAuth } from "../gateway/auth.js";
-import { registerHealthCheck } from "./health-check-registry.js";
+import { defineSplitHealthCheck, normalizeHealthCheck } from "./health-check-adapter.js";
+import { registerInternalHealthCheck } from "./health-check-registry.js";
+import type {
+  HealthCheckInput,
+  RegisteredHealthCheck,
+  RunnableHealthCheck,
+} from "./health-check-runner-types.js";
 import type { HealthCheck, HealthFinding } from "./health-checks.js";
 
 const BROWSER_CLAWD_PROFILE_RESIDUE_CHECK_ID = "core/doctor/browser-clawd-profile-residue";
 const FINAL_CONFIG_VALIDATION_CHECK_ID = "core/doctor/final-config-validation";
+
+type CoreDoctorRuntimeContext = {
+  readonly doctor?: {
+    readonly options?: { readonly nonInteractive?: boolean };
+    readonly confirm?: (params: { message: string; initialValue?: boolean }) => Promise<boolean>;
+  };
+  readonly env?: NodeJS.ProcessEnv;
+};
+
+function coreDoctorRuntimeContext<T extends object>(ctx: T): T & CoreDoctorRuntimeContext {
+  return ctx as T & CoreDoctorRuntimeContext;
+}
 
 export type CoreHealthCheckDeps = {
   readonly detectUnavailableSkills: (cfg: OpenClawConfig) => Promise<readonly SkillStatusEntry[]>;
@@ -736,18 +754,181 @@ function createWorkspaceSuggestionsCheck(deps: CoreHealthCheckDeps): HealthCheck
   };
 }
 
-function createConvertedWorkflowChecks(deps: CoreHealthCheckDeps): readonly HealthCheck[] {
+const shellCompletionCheck: RunnableHealthCheck = {
+  id: "core/doctor/shell-completion",
+  kind: "core",
+  description: "Shell completion status is detected and repairable through cached completion.",
+  source: "doctor",
+  async run(ctx) {
+    const { detectShellCompletionHealth } = await import("../commands/doctor-completion.js");
+    const options =
+      ctx.mode === "lint" ? { ...ctx.doctor?.options, nonInteractive: true } : ctx.doctor?.options;
+    const findings = await detectShellCompletionHealth(options);
+    if (findings.length === 0) {
+      return { findings };
+    }
+    if (!ctx.repair) {
+      return {
+        findings,
+        status: "repairable",
+        changes: ["Would repair shell completion setup."],
+        effects: [
+          {
+            kind: "file",
+            action: "would-repair-shell-completion",
+            target: "shell completion profile/cache",
+            dryRunSafe: false,
+          },
+        ],
+      };
+    }
+    const { repairShellCompletionHealth } = await import("../commands/doctor-completion.js");
+    const result = await repairShellCompletionHealth({
+      options: ctx.doctor?.options,
+      deps: {
+        confirm: ctx.doctor?.confirm,
+      },
+    });
+    return {
+      findings,
+      status: result.status,
+      changes: result.changes,
+      warnings: result.warnings,
+    };
+  },
+};
+
+const startupChannelMaintenanceCheck: RunnableHealthCheck = {
+  id: "core/doctor/startup-channel-maintenance",
+  kind: "core",
+  description: "Channel plugin startup maintenance runs through structured doctor repair.",
+  source: "doctor",
+  async run(ctx, scope) {
+    if (scope?.findings !== undefined) {
+      return { findings: [] };
+    }
+    const findings: HealthFinding[] = [
+      {
+        checkId: "core/doctor/startup-channel-maintenance",
+        severity: "info",
+        message: "Channel plugin startup maintenance should run during doctor repair.",
+      },
+    ];
+    if (!ctx.repair) {
+      return {
+        findings,
+        status: "repairable",
+        changes: ["Would run channel plugin startup maintenance."],
+        effects: [
+          {
+            kind: "other",
+            action: "would-run-channel-startup-maintenance",
+            target: "channel plugin startup maintenance",
+            dryRunSafe: false,
+          },
+        ],
+      };
+    }
+    const { maybeRunDoctorStartupChannelMaintenance } =
+      await import("./doctor-startup-channel-maintenance.js");
+    await maybeRunDoctorStartupChannelMaintenance({
+      cfg: ctx.cfg,
+      env: ctx.env,
+      runtime: ctx.runtime,
+      shouldRepair: true,
+    });
+    return { findings, changes: [] };
+  },
+};
+
+const systemdLingerCheck: HealthCheck = defineSplitHealthCheck({
+  id: "core/doctor/systemd-linger",
+  kind: "core",
+  description: "systemd user linger status is detected and repairable for local Gateway.",
+  source: "doctor",
+  async detect(ctx) {
+    const runtimeCtx = coreDoctorRuntimeContext(ctx);
+    if (
+      runtimeCtx.doctor?.options?.nonInteractive === true ||
+      process.platform !== "linux" ||
+      resolveDoctorMode(ctx.cfg) !== "local"
+    ) {
+      return [];
+    }
+    const { resolveGatewayService } = await import("../daemon/service.js");
+    const service = resolveGatewayService();
+    let loaded = false;
+    try {
+      loaded = await service.isLoaded({ env: runtimeCtx.env ?? process.env });
+    } catch {
+      loaded = false;
+    }
+    if (!loaded) {
+      return [];
+    }
+    const { SYSTEMD_GATEWAY_LINGER_REASON, detectSystemdUserLingerFindings } =
+      await import("../commands/systemd-linger.js");
+    const findings = await detectSystemdUserLingerFindings({
+      env: runtimeCtx.env,
+      reason: SYSTEMD_GATEWAY_LINGER_REASON,
+    });
+    return findings.map(
+      (finding): HealthFinding => ({
+        checkId: "core/doctor/systemd-linger",
+        severity: "warning",
+        message: finding.message,
+        source: "systemd",
+        fixHint: finding.fixHint,
+      }),
+    );
+  },
+  async repair(ctx) {
+    const runtimeCtx = coreDoctorRuntimeContext(ctx);
+    if (ctx.dryRun === true) {
+      return {
+        changes: ["Would enable systemd lingering if it is disabled for the Gateway user."],
+        effects: [
+          {
+            kind: "service",
+            action: "would-enable-systemd-linger",
+            target: "systemd user linger",
+            dryRunSafe: false,
+          },
+        ],
+      };
+    }
+    const { SYSTEMD_GATEWAY_LINGER_REASON, repairSystemdUserLingerFinding } =
+      await import("../commands/systemd-linger.js");
+    const result = await repairSystemdUserLingerFinding({
+      runtime: ctx.runtime,
+      env: runtimeCtx.env,
+      confirm: runtimeCtx.doctor?.confirm,
+      reason: SYSTEMD_GATEWAY_LINGER_REASON,
+      requireConfirm: true,
+    });
+    return {
+      status: result.status,
+      changes: result.changes,
+      warnings: result.warnings,
+    };
+  },
+});
+
+function createConvertedWorkflowChecks(deps: CoreHealthCheckDeps): readonly HealthCheckInput[] {
   return [
     claudeCliCheck,
     gatewayAuthCheck,
     legacyStateCheck,
     legacyWhatsAppCrontabCheck,
     gatewayPlatformNotesCheck,
+    startupChannelMaintenanceCheck,
     createSecurityCheck(deps),
     browserCheck,
     openAIOAuthTlsCheck,
     hooksModelCheck,
+    systemdLingerCheck,
     bootstrapSizeCheck,
+    shellCompletionCheck,
     createWorkspaceSuggestionsCheck(deps),
   ];
 }
@@ -759,7 +940,7 @@ export function registerCoreHealthChecks(): void {
     return;
   }
   for (const check of CORE_HEALTH_CHECKS) {
-    registerHealthCheck(check);
+    registerInternalHealthCheck(check);
   }
   registered = true;
 }
@@ -770,8 +951,8 @@ export function resetCoreHealthChecksForTest(): void {
 
 export function createCoreHealthChecks(
   deps: CoreHealthCheckDeps = defaultCoreHealthCheckDeps,
-): readonly HealthCheck[] {
-  return [
+): readonly RegisteredHealthCheck[] {
+  const checks: readonly HealthCheckInput[] = [
     gatewayConfigCheck,
     ...createConvertedWorkflowChecks(deps),
     commandOwnerCheck,
@@ -780,9 +961,10 @@ export function createCoreHealthChecks(
     browserClawdProfileResidueCheck,
     finalConfigValidationCheck,
   ];
+  return checks.map(normalizeHealthCheck);
 }
 
-export const CORE_HEALTH_CHECKS: readonly HealthCheck[] = createCoreHealthChecks();
+export const CORE_HEALTH_CHECKS: readonly RegisteredHealthCheck[] = createCoreHealthChecks();
 
 function formatMissingSkillSummary(skill: SkillStatusEntry): string {
   const missing: string[] = [];

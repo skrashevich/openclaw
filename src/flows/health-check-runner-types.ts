@@ -11,6 +11,11 @@ import type {
 export interface HealthCheckRunContext extends HealthCheckContext {
   readonly repair: boolean;
   readonly diff?: boolean;
+  readonly doctor?: {
+    readonly options?: { readonly nonInteractive?: boolean };
+    readonly confirm?: (params: { message: string; initialValue?: boolean }) => Promise<boolean>;
+  };
+  readonly env?: NodeJS.ProcessEnv;
   readonly previewRepair?: boolean;
 }
 

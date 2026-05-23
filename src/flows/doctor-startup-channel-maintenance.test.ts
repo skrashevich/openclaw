@@ -1,7 +1,28 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { CORE_HEALTH_CHECKS } from "./doctor-core-checks.js";
 import { maybeRunDoctorStartupChannelMaintenance } from "./doctor-startup-channel-maintenance.js";
+import type { HealthCheckInput, RunnableHealthCheck } from "./health-check-runner-types.js";
+
+const startupMaintenanceMocks = vi.hoisted(() => ({
+  runChannelPluginStartupMaintenance: vi.fn(),
+}));
+
+vi.mock("../channels/plugins/lifecycle-startup.js", () => ({
+  runChannelPluginStartupMaintenance: startupMaintenanceMocks.runChannelPluginStartupMaintenance,
+}));
+
+function expectRunnableCheck(check: HealthCheckInput | undefined): RunnableHealthCheck {
+  if (!check || !("run" in check)) {
+    throw new Error("Expected runnable health check");
+  }
+  return check;
+}
 
 describe("doctor startup channel maintenance", () => {
+  beforeEach(() => {
+    startupMaintenanceMocks.runChannelPluginStartupMaintenance.mockReset();
+  });
+
   it("runs Matrix startup migration during repair flows", async () => {
     const cfg = {
       channels: {
@@ -64,5 +85,62 @@ describe("doctor startup channel maintenance", () => {
     });
 
     expect(calls).toStrictEqual([]);
+  });
+
+  it("runs startup migration through the structured repair check", async () => {
+    const check = expectRunnableCheck(
+      CORE_HEALTH_CHECKS.find((entry) => entry.id === "core/doctor/startup-channel-maintenance"),
+    );
+    const runtime = {
+      log: vi.fn(),
+      error: vi.fn(),
+      exit: vi.fn(),
+    };
+
+    const cfg = {
+      channels: {
+        matrix: {
+          homeserver: "https://matrix.example.org",
+          userId: "@bot:example.org",
+          accessToken: "tok-123",
+        },
+      },
+    };
+    const env = { OPENCLAW_TEST: "1" };
+    const result = await check.run({
+      mode: "fix",
+      runtime,
+      cfg,
+      env,
+      repair: true,
+    });
+    const findings = Array.isArray(result) ? result : (result?.findings ?? []);
+
+    expect(findings).toContainEqual(
+      expect.objectContaining({
+        checkId: "core/doctor/startup-channel-maintenance",
+      }),
+    );
+    expect(result).toMatchObject({ changes: [] });
+    await expect(
+      check.run(
+        {
+          mode: "fix",
+          runtime,
+          cfg,
+          env,
+          repair: false,
+        },
+        { findings },
+      ),
+    ).resolves.toMatchObject({ findings: [] });
+    expect(startupMaintenanceMocks.runChannelPluginStartupMaintenance).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cfg,
+        env,
+        trigger: "doctor-fix",
+        logPrefix: "doctor",
+      }),
+    );
   });
 });
