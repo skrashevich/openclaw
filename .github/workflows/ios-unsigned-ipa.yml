@@ -36,21 +36,10 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Select Xcode 16.3 and install Swift 6.2 via swiftly
+      - name: Select Xcode 26.2 (Swift 6.2.3)
         run: |
-          sudo xcode-select -s /Applications/Xcode_16.3.app
+          sudo xcode-select -s /Applications/Xcode_26.2.app
           xcodebuild -version
-
-          # Install swiftly and Swift 6.2
-          curl -fsSL https://download.swift.org/swiftly/darwin/swiftly.pkg -o /tmp/swiftly.pkg
-          installer -pkg /tmp/swiftly.pkg -target CurrentUserHomeDirectory
-          export PATH="$HOME/.swiftly/bin:$PATH"
-          echo "SWIFTLY_HOME_DIR=$HOME/.swiftly" >> "$GITHUB_ENV"
-          echo "$HOME/.swiftly/bin" >> "$GITHUB_PATH"
-          swiftly init --assume-yes --no-modify-profile 2>&1
-          swiftly install 6.2 2>&1 | tail -10
-          swiftly use 6.2
-          which swift
           swift --version
 
       - name: Install xcodegen
@@ -62,8 +51,7 @@ jobs:
 
       - name: Build iOS app (unsigned)
         working-directory: apps/ios
-        env:
-          TOOLCHAINS: swift
+        # Xcode 26.2 has Swift 6.2 built-in
         run: |
           set -euo pipefail
 
