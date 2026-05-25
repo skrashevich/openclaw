@@ -36,27 +36,23 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Select Xcode 16.3 and install Swift 6.2 toolchain
+      - name: Select Xcode 16.3 and install Swift 6.2 via swiftly
         run: |
-          sudo xcode-select -s /Applications/Xcode_16.3.app || sudo xcode-select -s /Applications/Xcode_16.2.app
+          sudo xcode-select -s /Applications/Xcode_16.3.app
           xcodebuild -version
 
-          # Download & install Swift 6.2 development snapshot toolchain
-          TOOLCHAIN_URL="https://download.swift.org/development/xcode/latest/development/installer/swift-latest-osx.pkg"
-          echo "Downloading Swift development toolchain..."
-          curl -sL "$TOOLCHAIN_URL" -o /tmp/swift-toolchain.pkg
-          sudo installer -pkg /tmp/swift-toolchain.pkg -target / 2>&1 | tail -3
+          # Install swiftly and Swift 6.2
+          curl -fsSL https://download.swift.org/swiftly/darwin/swiftly.pkg -o /tmp/swiftly.pkg
+          installer -pkg /tmp/swiftly.pkg -target CurrentUserHomeDirectory
+          export PATH="$HOME/.swiftly/bin:$PATH"
+          echo "SWIFTLY_HOME_DIR=$HOME/.swiftly" >> "$GITHUB_ENV"
+          echo "$HOME/.swiftly/bin" >> "$GITHUB_PATH"
+          swiftly install 6.2 2>&1 | tail -5
+          swiftly use 6.2
+          which swift
+          swift --version
 
-          TC=$(ls -d /Library/Developer/Toolchains/swift-*-DEV* 2>/dev/null | head -1)
-          if [ -n "$TC" ]; then
-            echo "Using toolchain: $TC"
-            echo "TOOLCHAINS=swift" >> "$GITHUB_ENV"
-            echo "DEVELOPER_DIR=$(dirname "$TC")/.." >> "$GITHUB_ENV"
-            "$TC/usr/bin/swift" --version
-          else
-            echo "No DEV toolchain found, trying Xcode built-in"
-            swift --version
-          fi
+      - name: Install xcodegen
 
       - name: Install xcodegen
         run: brew install xcodegen
@@ -67,6 +63,8 @@ jobs:
 
       - name: Build iOS app (unsigned)
         working-directory: apps/ios
+        env:
+          TOOLCHAINS: swift
         run: |
           set -euo pipefail
 
