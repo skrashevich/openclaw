@@ -42,8 +42,8 @@ jobs:
           xcodebuild -version
           swift --version
 
-      - name: Install xcodegen
-        run: brew install xcodegen
+      - name: Install xcodegen and swiftlint
+        run: brew install xcodegen swiftlint
 
       - name: Generate Xcode project
         working-directory: apps/ios
