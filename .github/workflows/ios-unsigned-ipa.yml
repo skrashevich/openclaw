@@ -53,8 +53,6 @@ jobs:
           swift --version
 
       - name: Install xcodegen
-
-      - name: Install xcodegen
         run: brew install xcodegen
 
       - name: Generate Xcode project
