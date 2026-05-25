@@ -47,7 +47,8 @@ jobs:
           export PATH="$HOME/.swiftly/bin:$PATH"
           echo "SWIFTLY_HOME_DIR=$HOME/.swiftly" >> "$GITHUB_ENV"
           echo "$HOME/.swiftly/bin" >> "$GITHUB_PATH"
-          swiftly install 6.2 2>&1 | tail -5
+          swiftly init --quiet 2>&1
+          swiftly install 6.2 2>&1 | tail -10
           swiftly use 6.2
           which swift
           swift --version
