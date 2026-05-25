@@ -34,6 +34,7 @@ Text is supported everywhere; media and reactions vary by channel.
 - [IRC](/channels/irc) - Classic IRC servers; channels + DMs with pairing/allowlist controls.
 - [LINE](/channels/line) - LINE Messaging API bot (downloadable plugin).
 - [Matrix](/channels/matrix) - Matrix protocol (downloadable plugin).
+- [Meshtastic](/channels/meshtastic) - LoRa mesh via Meshtastic node HTTP API (downloadable plugin).
 - [Mattermost](/channels/mattermost) - Bot API + WebSocket; channels, groups, DMs (downloadable plugin).
 - [Microsoft Teams](/channels/msteams) - Bot Framework; enterprise support (bundled plugin).
 - [Nextcloud Talk](/channels/nextcloud-talk) - Self-hosted chat via Nextcloud Talk (bundled plugin).

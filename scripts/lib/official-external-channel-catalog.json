@@ -300,6 +300,29 @@
       }
     },
     {
+      "name": "@openclaw/meshtastic",
+      "description": "OpenClaw Meshtastic channel plugin via HTTP transport",
+      "source": "official",
+      "kind": "channel",
+      "openclaw": {
+        "channel": {
+          "id": "meshtastic",
+          "label": "Meshtastic",
+          "selectionLabel": "Meshtastic (HTTP API)",
+          "docsPath": "/channels/meshtastic",
+          "docsLabel": "meshtastic",
+          "blurb": "LoRa mesh messaging via Meshtastic node HTTP API.",
+          "order": 68,
+          "quickstartAllowFrom": true
+        },
+        "install": {
+          "npmSpec": "@openclaw/meshtastic",
+          "defaultChoice": "npm",
+          "minHostVersion": ">=2026.4.10"
+        }
+      }
+    },
+    {
       "name": "@openclaw/msteams",
       "description": "OpenClaw Microsoft Teams channel plugin",
       "source": "official",

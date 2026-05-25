@@ -1084,6 +1084,7 @@
                 "pages": [
                   "channels/irc",
                   "channels/mattermost",
+                  "channels/meshtastic",
                   "channels/nextcloud-talk",
                   "channels/nostr",
                   "channels/tlon",
