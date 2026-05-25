@@ -1,0 +1,68 @@
+{
+  "name": "@openclaw/meshtastic",
+  "version": "2026.5.22",
+  "description": "OpenClaw Meshtastic channel plugin via HTTP transport",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/openclaw/openclaw"
+  },
+  "type": "module",
+  "dependencies": {
+    "@meshtastic/core": "2.6.7",
+    "@meshtastic/transport-http": "0.2.5",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@openclaw/plugin-sdk": "workspace:*",
+    "openclaw": "workspace:*"
+  },
+  "peerDependencies": {
+    "openclaw": ">=2026.5.22"
+  },
+  "peerDependenciesMeta": {
+    "openclaw": {
+      "optional": true
+    }
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ],
+    "setupEntry": "./setup-entry.ts",
+    "channel": {
+      "id": "meshtastic",
+      "label": "Meshtastic",
+      "selectionLabel": "Meshtastic (HTTP API)",
+      "docsPath": "/channels/meshtastic",
+      "docsLabel": "meshtastic",
+      "blurb": "LoRa mesh messaging via Meshtastic node HTTP API.",
+      "order": 68,
+      "quickstartAllowFrom": true,
+      "cliAddOptions": [
+        {
+          "flags": "--host <host>",
+          "description": "Meshtastic node host or IP (optionally host:port)"
+        },
+        {
+          "flags": "--tls",
+          "description": "Use HTTPS for the Meshtastic HTTP API"
+        }
+      ]
+    },
+    "install": {
+      "npmSpec": "@openclaw/meshtastic",
+      "defaultChoice": "npm",
+      "minHostVersion": ">=2026.4.10"
+    },
+    "compat": {
+      "pluginApi": ">=2026.5.22"
+    },
+    "build": {
+      "openclawVersion": "2026.5.22"
+    },
+    "release": {
+      "publishToClawHub": true,
+      "publishToNpm": true
+    }
+  }
+}
