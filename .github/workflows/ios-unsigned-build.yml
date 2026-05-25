@@ -1,0 +1,166 @@
+name: iOS Unsigned IPA Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch/tag/commit to build (default: main upstream)"
+        required: false
+        default: ""
+        type: string
+  push:
+    branches: [main]
+    paths:
+      - "apps/ios/**"
+      - "scripts/ios-*"
+      - "shared/OpenClawKit/**"
+      - "swabble/**"
+      - ".github/workflows/ios-unsigned-build.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-unsigned-ipa:
+    runs-on: macos-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Setup Xcode
+        run: |
+          # Use Xcode 16.4 with Swift 6.2+ for swabble/openclawkit
+          echo "DEVELOPER_DIR=/Applications/Xcode_26.3.app/Contents/Developer" >> $GITHUB_ENV
+          xcodebuild -version
+          swift --version
+
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup pnpm
+        run: npm install -g pnpm@latest-10
+
+      - name: Install Dependencies
+        run: pnpm install
+        working-directory: ${{ github.workspace }}
+
+      - name: Install xcodegen
+        run: |
+          HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen || brew upgrade xcodegen 2>/dev/null || true
+
+      - name: Install Swift tooling
+        run: |
+          HOMEBREW_NO_AUTO_UPDATE=1 brew install swiftformat swiftlint 2>/dev/null || true
+
+      - name: Configure Signing and Version
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "${{ github.workspace }}/apps/ios/build"
+
+          IOS_VERSION="$(cat ${{ github.workspace }}/apps/ios/version.json | python3 -c 'import json,sys; print(json.load(sys.stdin).get("version","0"))')"
+          BUILD_NUMBER="$(cd ${{ github.workspace }} && git rev-list --count HEAD 2>/dev/null || echo 1)"
+
+          printf '%s\n' \
+            "OPENCLAW_IOS_VERSION = ${IOS_VERSION}" \
+            "OPENCLAW_MARKETING_VERSION = ${IOS_VERSION}" \
+            "OPENCLAW_BUILD_VERSION = ${BUILD_NUMBER}" \
+            > "${{ github.workspace }}/apps/ios/build/Version.xcconfig"
+
+          printf '%s\n' \
+            "OPENCLAW_CODE_SIGN_STYLE = Manual" \
+            "OPENCLAW_DEVELOPMENT_TEAM =" \
+            "OPENCLAW_APP_BUNDLE_ID = ai.openclaw.ios.unsigned" \
+            "OPENCLAW_SHARE_BUNDLE_ID = ai.openclaw.ios.unsigned.share" \
+            "OPENCLAW_ACTIVITY_WIDGET_BUNDLE_ID = ai.openclaw.ios.unsigned.activitywidget" \
+            "OPENCLAW_WATCH_APP_BUNDLE_ID = ai.openclaw.ios.unsigned.watchkitapp" \
+            "OPENCLAW_WATCH_EXTENSION_BUNDLE_ID = ai.openclaw.ios.unsigned.watchkitapp.extension" \
+            "OPENCLAW_APP_PROFILE =" \
+            "OPENCLAW_SHARE_PROFILE =" \
+            "CODE_SIGN_IDENTITY =" \
+            "CODE_SIGNING_REQUIRED = NO" \
+            "CODE_SIGNING_ALLOWED = NO" \
+            "CODE_SIGN_STYLE = Manual" \
+            > "${{ github.workspace }}/apps/ios/.local-signing.xcconfig"
+
+      - name: Generate Xcode Project
+        run: |
+          cd "${{ github.workspace }}/apps/ios"
+          xcodegen generate
+
+      - name: Build Unsigned .app
+        run: |
+          cd "${{ github.workspace }}/apps/ios"
+          set -o pipefail
+          xcodebuild \
+            -project OpenClaw.xcodeproj \
+            -scheme OpenClaw \
+            -configuration Release \
+            -derivedDataPath build/DerivedData \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGN_STYLE=Manual \
+            GCC_WARN_AS_ERROR=NO \
+            DEVELOPMENT_TEAM="" \
+            build 2>&1 | tee build/xcodebuild.log
+
+      - name: Locate .app Bundle
+        id: locate_app
+        run: |
+          # Prefer main OpenClaw.app over OpenClawWatchApp.app
+          for candidate in "OpenClaw.app" "OpenClawWatchApp.app"; do
+            APP_PATH=$(find "${{ github.workspace }}/apps/ios/build/DerivedData" -name "$candidate" -type d -maxdepth 5 | head -1)
+            [ -n "$APP_PATH" ] && break
+          done
+          if [ -z "$APP_PATH" ]; then
+            echo "❌ .app bundle not found!"
+            exit 1
+          fi
+          echo "Found .app: $APP_PATH"
+          echo "app_path=$APP_PATH" >> $GITHUB_OUTPUT
+          ls -la "$APP_PATH"
+
+      - name: Package Unsigned .ipa
+        id: package_ipa
+        run: |
+          APP_PATH="${{ steps.locate_app.outputs.app_path }}"
+          BUILD_DIR="${{ github.workspace }}/apps/ios/build"
+          VERSION=$(cat "${{ github.workspace }}/apps/ios/version.json" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("version","0"))')
+          BUILD_NUM=$(cd "${{ github.workspace }}" && git rev-list --count HEAD 2>/dev/null || echo 1)
+          IPA_NAME="OpenClaw-${VERSION}-unsigned-build${BUILD_NUM}.ipa"
+
+          mkdir -p "${BUILD_DIR}/Payload"
+          cp -r "$APP_PATH" "${BUILD_DIR}/Payload/"
+          cd "${BUILD_DIR}"
+          zip -qr "${IPA_NAME}" Payload/
+          rm -rf Payload/
+
+          echo "📦 Created: ${BUILD_DIR}/${IPA_NAME}"
+          ls -lh "${BUILD_DIR}/${IPA_NAME}"
+          echo "ipa_path=${BUILD_DIR}/${IPA_NAME}" >> $GITHUB_OUTPUT
+          echo "ipa_name=${IPA_NAME}" >> $GITHUB_OUTPUT
+
+      - name: Upload Unsigned .ipa Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package_ipa.outputs.ipa_name }}
+          path: ${{ steps.package_ipa.outputs.ipa_path }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload Build Log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: ${{ github.workspace }}/apps/ios/build/xcodebuild.log
+          retention-days: 7

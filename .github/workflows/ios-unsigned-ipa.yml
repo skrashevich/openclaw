@@ -1,0 +1,121 @@
+name: iOS Unsigned IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/ios/**'
+      - 'apps/shared/**'
+      - 'apps/swabble/**'
+      - '.github/workflows/ios-unsigned-ipa.yml'
+
+concurrency:
+  group: ios-unsigned-ipa-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build unsigned .ipa
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with: {}
+        # version auto-detected from package.json packageManager field
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Select Xcode 16.3 (for Swift 6.2)
+        run: |
+          sudo xcode-select -s /Applications/Xcode_16.3.app || \
+          sudo xcode-select -s /Applications/Xcode_16.2.app
+          xcodebuild -version
+          swift --version
+
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        working-directory: apps/ios
+        run: xcodegen generate
+
+      - name: Build iOS app (unsigned)
+        working-directory: apps/ios
+        run: |
+          set -euo pipefail
+
+          DERIVED_DATA=$(mktemp -d)
+          SCHEME="OpenClaw"
+          CONFIG="Release"
+          ARCHIVE_PATH=$(mktemp -d)/OpenClaw.xcarchive
+
+          # Build archive with code signing disabled (ad-hoc)
+          xcodebuild archive \
+            -project OpenClaw.xcodeproj \
+            -scheme "$SCHEME" \
+            -configuration "$CONFIG" \
+            -destination "generic/platform=iOS" \
+            -archivePath "$ARCHIVE_PATH" \
+            -derivedDataPath "$DERIVED_DATA" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGN_IDENTITY="" \
+            PROVISIONING_PROFILE_SPECIFIER="" \
+            -allowProvisioningUpdates \
+            | xcpretty || cat xcodebuild.log 2>/dev/null || echo "Build output logged above"
+
+          if [ ! -d "$ARCHIVE_PATH/Products/Applications" ]; then
+            # xcodebuild archive might put the .app in Payload or a subpath
+            find "$ARCHIVE_PATH" -name "*.app" -type d | head -5
+          fi
+
+          # Extract version
+          APP_PATH=$(find "$ARCHIVE_PATH" -name "*.app" -type d -maxdepth 4 | head -1)
+          if [ -z "$APP_PATH" ]; then
+            echo "No .app found in archive, checking derived data..."
+            find "$DERIVED_DATA" -name "*.app" -type d -maxdepth 6 | head -5
+            exit 1
+          fi
+
+          PLIST="$APP_PATH/Info.plist"
+          VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$PLIST" 2>/dev/null || echo "unknown")
+          BUILD=$(/usr/libexec/PlistBuddy -c "Print CFBundleVersion" "$PLIST" 2>/dev/null || echo "0")
+
+          echo "App version: $VERSION (build $BUILD)"
+          echo "APP_VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "APP_BUILD=$BUILD" >> "$GITHUB_ENV"
+
+          # Create unsigned IPA: Payload directory + zip + rename
+          PAYLOAD_DIR=$(mktemp -d)/Payload
+          mkdir -p "$PAYLOAD_DIR"
+          cp -R "$APP_PATH" "$PAYLOAD_DIR/"
+
+          IPA_NAME="OpenClaw-$VERSION-unsigned.ipa"
+          cd "$(dirname "$PAYLOAD_DIR")"
+          zip -qr "$IPA_NAME" Payload/
+          mv "$IPA_NAME" "$GITHUB_WORKSPACE/$IPA_NAME"
+
+          echo "IPA_PATH=$GITHUB_WORKSPACE/$IPA_NAME" >> "$GITHUB_ENV"
+          echo "Built unsigned IPA: $IPA_NAME ($(du -h "$GITHUB_WORKSPACE/$IPA_NAME" | cut -f1))"
+
+          # Cleanup
+          rm -rf "$DERIVED_DATA" "$ARCHIVE_PATH" "$(dirname "$PAYLOAD_DIR")"
+
+      - name: Upload unsigned IPA as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenClaw-iOS-unsigned-${{ env.APP_VERSION || 'latest' }}
+          path: OpenClaw-*.ipa
+          compression-level: 0
+          if-no-files-found: error
